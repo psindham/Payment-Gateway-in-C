@@ -6,7 +6,6 @@
 #include <sys/wait.h>
 #include <ctype.h>
 #include <sys/stat.h>
-#include <pthread.h>
 #include <fcntl.h>
 //include <netinet/in.h>
 //include <arpa/inet.h>
@@ -14,8 +13,6 @@
 /* Misc constants */
 #define	MAXLINE	 8192  /* Max text line length */
 #define LISTENQ  1024  /* Second argument to listen() */
-
-pthread_rwlock_t  rw_lock_payment;
 
 int open_listenfd(char *port) 
 {
@@ -116,28 +113,20 @@ char* TransactPayment(char buf[])
 }
 int UpdateGateawyTrasaction(char buf[])
 {
-   char c[MAXLINE];
+    char c[MAXLINE];
    size_t len = 0;
    int srcfd = open("DataFiles/PaymentTokensData.txt",O_RDWR);
-   int read_res;
-    while(1)
+    while (read(srcfd,c,29))
 	{
-        pthread_rwlock_rdlock(&rw_lock_payment);
-        read_res=read(srcfd,c,29);
-        pthread_rwlock_unlock(&rw_lock_payment);
-        if(read_res==0)
-            break;
             if(strncmp(c,buf,19)==0)
             {   
                 if(c[20]=='0')
                 {
                     char temp[2]="1";
-                    pthread_rwlock_wrlock(&rw_lock_payment);
-                        if(lseek(srcfd,-9,SEEK_CUR)==-1)
-                            printf("Error-11");
-                        if(write(srcfd,temp,1)==-1)
-                            printf("Error-12");
-                    pthread_rwlock_unlock(&rw_lock_payment);
+                    if(lseek(srcfd,-9,SEEK_CUR)==-1)
+                        printf("Error-11");
+                    if(write(srcfd,temp,1)==-1)
+                        printf("Error-12");
                     close(srcfd);
                     return 1; //payment update done!
                 }
@@ -264,14 +253,6 @@ void* PaymentTokenReceiver(int* connfd)
             }
     }
 }
-void *handle_clients(void *connfd){
-    int client_connfd= *((int*)connfd);
-    free(connfd);
-    PaymentTokenReceiver(&client_connfd);
-    printf("End Communication with Client\n");
-    close(client_connfd);
-}
-
 int main(int argc, char **argv)
 {
     int listenfd, connfd;
@@ -284,17 +265,15 @@ int main(int argc, char **argv)
         printf("Waiting for Clients to connect\n");
         clientlen = sizeof(struct sockaddr_storage); /* Important! */
         connfd = accept(listenfd, (struct sockaddr *)&clientaddr, &clientlen);
+        if(fork()==0){
             getnameinfo((struct sockaddr *) &clientaddr, clientlen,
             client_hostname, MAXLINE, client_port, MAXLINE, 0);
             printf("Connected to (%s, %s)\n", client_hostname, client_port);
             printf("Start Communication with Client\n");
-            int *pclient=malloc(sizeof(int));
-            *pclient=connfd;
-            pthread_t tid;
-            int err =  pthread_create(&tid,NULL,handle_clients,(void *)pclient);
-            if (err != 0)
-		     	printf("cant create thread: %s\n", strerror(err));
-        
+            PaymentTokenReceiver(&connfd);
+            printf("End Communication with Client\n");
+            close(connfd);
+        }
     }
     exit(0);
 }
