@@ -8,14 +8,33 @@
 #include <sys/stat.h>
 #include <pthread.h>
 #include <fcntl.h>
-//include <netinet/in.h>
-//include <arpa/inet.h>
+#include <time.h>
+#include <signal.h>
+#include "./Includes/GateServer.h" // For 
+#include "./Includes/clientFD.h" //For Client Fd to Communicate with Bank
 
 /* Misc constants */
-#define	MAXLINE	 8192  /* Max text line length */
 #define LISTENQ  1024  /* Second argument to listen() */
+#define TRANSACTIONRECORD 29
+#define ONLYTRANPASS 19
+#define PAID 20
 
+int CItiBankLogFD;
 pthread_rwlock_t  rw_lock_payment;
+struct ClientParams{
+    char client_hostname[MAXLINE], client_port[MAXLINE];
+    int * connfd;
+}typedef ClientParams;
+
+struct tm * TIMENOW(){
+  time_t rawtime;
+  struct tm * timeinfo;
+
+  time ( &rawtime );
+  timeinfo = localtime ( &rawtime );
+  
+  return timeinfo;
+}
 
 int open_listenfd(char *port) 
 {
@@ -64,46 +83,6 @@ int open_listenfd(char *port)
     return listenfd;
 }
 
-int open_clientfd(char *hostname, char *port) {
-    int clientfd;
-    struct addrinfo hints, *listp, *p;
-	char host[MAXLINE],service[MAXLINE];
-    int flags;
-
-    /* Get a list of potential server addresses */
-    memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_socktype = SOCK_STREAM;  /* Open a connection */
-    hints.ai_flags = AI_NUMERICSERV;  /* ... using a numeric port arg. */
-    hints.ai_flags |= AI_ADDRCONFIG;  /* Recommended for connections where we get IPv4 or IPv6 addresses */
-    getaddrinfo(hostname, port, &hints, &listp);
-  
-    /* Walk the list for one that we can successfully connect to */
-    for (p = listp; p; p = p->ai_next) {
-        /* Create a socket descriptor */
-        if ((clientfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0) 
-            continue; /* Socket failed, try the next */
-
-		flags = NI_NUMERICHOST | NI_NUMERICSERV; /* Display address string instead of domain name and port number instead of service name */		
-		getnameinfo(p->ai_addr, p->ai_addrlen, host, MAXLINE, service, MAXLINE, flags);
-        printf("host:%s, service:%s\n", host, service);
-		
-        /* Connect to the server */
-        if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1) 
-		{
-			printf("Connected to server %s at port %s\n", host, service);
-            break; /* Success */
-		}
-        close(clientfd); /* Connect failed, try another */  //line:netp:openclientfd:closefd
-    } 
-
-    /* Clean up */
-    freeaddrinfo(listp);
-    if (!p) /* All connects failed */
-        return -1;
-    else    /* The last connect succeeded */
-        return clientfd;
-}
-
 char* TransactPayment(char buf[])
 {
     int clientfd;
@@ -114,7 +93,8 @@ char* TransactPayment(char buf[])
     close(clientfd);
     return (char *)buf;
 }
-int UpdateGateawyTrasaction(char buf[])
+
+int UpdateGatewayTrasaction(char buf[])
 {
    char c[MAXLINE];
    size_t len = 0;
@@ -123,13 +103,12 @@ int UpdateGateawyTrasaction(char buf[])
     while(1)
 	{
         pthread_rwlock_rdlock(&rw_lock_payment);
-        read_res=read(srcfd,c,29);
+        read_res=read(srcfd,c,TRANSACTIONRECORD);
         pthread_rwlock_unlock(&rw_lock_payment);
         if(read_res==0)
             break;
-            if(strncmp(c,buf,19)==0)
-            {   
-                if(c[20]=='0')
+            if(strncmp(c,buf,ONLYTRANPASS)==0){   
+                if(c[PAID]=='0')
                 {
                     char temp[2]="1";
                     pthread_rwlock_wrlock(&rw_lock_payment);
@@ -146,17 +125,18 @@ int UpdateGateawyTrasaction(char buf[])
    close(srcfd);
    return 0; //Payment Doesnot exists
 }
+
 int PaymentTokenValidator(char buf[])
 {
    char c[MAXLINE];
    size_t len = 0;
    int srcfd = open("DataFiles/PaymentTokensData.txt",O_RDONLY);
-    while (read(srcfd,c,29))
+    while (read(srcfd,c,TRANSACTIONRECORD))
 	{
-            printf("%s",c);     
-            if(strncmp(c,buf,19)==0)
+           // printf("%s",c);     
+            if(strncmp(c,buf,ONLYTRANPASS)==0)
             {   
-                if(c[20]!='0')
+                if(c[PAID]!='0')
                 {
                     close(srcfd);
                     return 2; //payment already done!
@@ -173,128 +153,141 @@ int PaymentTokenValidator(char buf[])
    return 0; //Payment Doesnot exists
 }
 
-char* decode(char parameters[]){
-    int childpid;
-    char *result= malloc(sizeof(char)*MAXLINE);
-    int fd[2];
-    pipe(fd);
-    if ( (childpid = fork() ) == -1){
-        fprintf(stderr, "FORK failed");
-    } else if( childpid == 0) {
-        dup2(fd[1], 1);
-        close(fd[0]);
-        execlp("ShellScriptFiles/decode.sh","ShellScriptFiles/decode.sh","-c",parameters,NULL);
-    }
-    wait(NULL);
-    read(fd[0], result, MAXLINE);
-    printf("%s",result);
-    return (char*)result;
-}
-void SaveTransaction(char UTR[],char Details[],int payment)
-{
-    char Resultant[50];
-    memset(Resultant,0,sizeof Resultant);
-    strncpy(Resultant,UTR+38,8);
-    strcat(Resultant," ");
-    strcat(Resultant,Details);
-    sprintf(Resultant+strlen(Resultant)," %d",payment);
-    strcat(Resultant,"\n");
-    printf("%s",Resultant);
-    int GTfd = open("DataFiles/GatewayTransaction.txt",O_APPEND|O_WRONLY);
-    if(write(GTfd,Resultant,strlen(Resultant))==-1)
-        printf("Error");
-    close(GTfd);
-}
 
-void* PaymentTokenReceiver(int* connfd)
- {
-    // memset( ,0,sizeof );
+void* PaymentTokenReceiver(int* connfd){
     size_t n;
     char buf[MAXLINE];
     char temp[MAXLINE];
     char *SuccessMess="Success";
     char FailMess[MAXLINE]="Payment Failed\0";
     char PaidMess[25]="Payment Already paid\0";
+    char BankReply[50];
     int flag=1;
     while(1){
         memset(buf,0,sizeof buf);
         n = read(*connfd, buf, MAXLINE); //Read TransactionID , passcode
         if(buf[0]=='\0')
-            break;
-        //printf("%s",buf);
-        //memset(buf,0,sizeof buf);
-        //strcpy(buf,decode(buf));   
+            break; // End the client communication 
          char temp2[MAXLINE];
-                strcpy(temp2,buf);
+         strcpy(temp2,buf);
         if(buf[0]=='0')
             break;
         printf("Gateway server received %d bytes\n", (int)n);
 	    buf[n] = '\0';
-             printf("Gateway server received message : %s\n", buf);
-             int resultPaymentValid=PaymentTokenValidator(buf);
-             char temp[10]; 
+         //    printf("Gateway server received message : %s\n", buf);
+             int resultPaymentValid=PaymentTokenValidator(buf); // validate Payment Token [0=Token Doesn't Exists,2=Already Paid,other than that  is Amount]
+             char temp[10];
+             char merchant[5];
+             strncpy(merchant,buf,4); 
              sprintf(temp,"%d",resultPaymentValid);
-             printf("%d",resultPaymentValid);
+            //  printf("%d",resultPaymentValid);
             if(resultPaymentValid!=0 && resultPaymentValid!=2){ // returns the amount
-                write(*connfd,temp,strlen(temp));  //Success of Payment 
+
+                write(*connfd,temp,strlen(temp));  //valid for Payment 
                 memset(buf, 0, sizeof buf);
-                n = read(*connfd, buf, MAXLINE); //read userId, password
+                n = read(*connfd, buf, MAXLINE); //then read userId, password
                 printf("Gateway server received %d bytes\n", (int)n);
-                buf[n] = '\0';
+
+                char Price[10];
+                sprintf(Price,"%d",resultPaymentValid);
+                strcat(buf," ");
+                strcat(buf,merchant);
+                strcat(buf," ");
+                strcat(buf,Price);
                 printf("Gateway server received message : %s\n", buf);
-                strcpy(temp,TransactPayment(buf));
-                if(strncmp(temp,"Account",7)!=0 && strncmp(temp,"Payment",7)!=0)
+
+                strcpy(BankReply,TransactPayment(buf));// Reply From the Bank
+
+                if(strncmp(BankReply,"Account",7)!=0 && strncmp(BankReply,"Payment",7)!=0)
                 {
-                    if(UpdateGateawyTrasaction(temp2)==1)
+                    if(UpdateGatewayTrasaction(temp2)==1)
                     {
                         printf("Gateway Transaction Payment Table updated \n");
-                        SaveTransaction(temp,temp2,resultPaymentValid);
-                        write(*connfd,temp,strlen(temp));
+                        pthread_t threadID;
+                        params  p;
+                        strcpy(p.UTR,BankReply);
+                        strcpy(p.Details,temp2);
+                        p.payment =resultPaymentValid;
+
+                        int err = pthread_create(&threadID,NULL,threadSaveTransaction,&p);
+                           // SaveTransaction(BankReply,temp2,resultPaymentValid);// want to do thread 
+                       	pthread_join(threadID, NULL);
+                        write(*connfd,BankReply,strlen(BankReply));
+                        memset(BankReply,0,sizeof BankReply);
                     }else{
                         printf("Gateway Transaction Payment Table Not updated \n");
-                        write(*connfd,temp,strlen(temp));
+                        write(*connfd,BankReply,strlen(BankReply));
+                        memset(BankReply,0,sizeof BankReply);
                     }
+                }else{
+                     write(*connfd,BankReply,strlen(BankReply));
+                     memset(BankReply,0,sizeof BankReply);
                 }
             }else if(resultPaymentValid==2){ //if payment is already done
                 memset(buf, 0, sizeof buf);
-                write(*connfd,PaidMess,strlen(PaidMess));       //Payment already done
+                write(*connfd,PaidMess,strlen(PaidMess));//Payment already done
             }else if(resultPaymentValid==0){
                 memset(buf, 0, sizeof buf);
-                write(*connfd,FailMess,strlen(FailMess));       //Failure of Payment
+                write(*connfd,FailMess,strlen(FailMess));//Failure of Payment
             }
     }
 }
-void *handle_clients(void *connfd){
-    int client_connfd= *((int*)connfd);
-    free(connfd);
+
+void *handle_clients(void *arg){
+    ClientParams * CP = arg;
+    char CitiSerBUF[MAXLINE*3];
+    int client_connfd= *((int*)CP->connfd);
+    //free(CP->connfd);
     PaymentTokenReceiver(&client_connfd);
-    printf("End Communication with Client\n");
+    struct tm * timeinfo= TIMENOW();
+    sprintf(CitiSerBUF,"End Communication with Client to (%s, %s, at %s)\n",CP->client_hostname, CP->client_port,asctime(timeinfo));
+    write(CItiBankLogFD,CitiSerBUF,strlen(CitiSerBUF));
+    printf("End Communication with PaymentClient\n");
     close(client_connfd);
 }
 
+ void inthandler(){
+     printf("\nSignal TRAPPED !!!\n");
+ } 
+
 int main(int argc, char **argv)
 {
+        struct sigaction newhandler; 
+        sigset_t blocked; 
+        newhandler.sa_handler = inthandler; 
+        sigfillset(&blocked); 
+        newhandler.sa_mask = blocked; 
+        int i;
+        for (i=1; i<31;i++)
+            if (i!=9 && i!=17) /* catch all except these signals */
+                if ( sigaction(i, &newhandler, NULL) == -1 )
+                    printf("error with signal %d\n", i);
+
     int listenfd, connfd;
     socklen_t clientlen;
     struct sockaddr_storage clientaddr; /* Enough room for any addr */
-    char client_hostname[MAXLINE], client_port[MAXLINE];
+    char client_hostname[MAXLINE], client_port[MAXLINE],Buffer[MAXLINE*3];
     listenfd = open_listenfd(argv[1]);
-  
+    CItiBankLogFD = open("LogFiles/GatewayServerLogs.txt",O_RDWR | O_CREAT | O_APPEND);
     while (1) {
         printf("Waiting for Clients to connect\n");
         clientlen = sizeof(struct sockaddr_storage); /* Important! */
         connfd = accept(listenfd, (struct sockaddr *)&clientaddr, &clientlen);
             getnameinfo((struct sockaddr *) &clientaddr, clientlen,
             client_hostname, MAXLINE, client_port, MAXLINE, 0);
-            printf("Connected to (%s, %s)\n", client_hostname, client_port);
-            printf("Start Communication with Client\n");
-            int *pclient=malloc(sizeof(int));
-            *pclient=connfd;
+             struct tm * timeinfo= TIMENOW();
+            sprintf(Buffer,"Connected to (%s, %s,%s)\n", client_hostname, client_port,asctime(timeinfo));
+            write(CItiBankLogFD,Buffer,strlen(Buffer));
+            printf("Start Communication with Payment Client\n");
+            ClientParams CP;
+            strcpy(CP.client_hostname,client_hostname);
+            strcpy(CP.client_port,client_port);
+            CP.connfd=malloc(sizeof(int));
+            CP.connfd=&connfd;
             pthread_t tid;
-            int err =  pthread_create(&tid,NULL,handle_clients,(void *)pclient);
+            int err =  pthread_create(&tid,NULL,handle_clients,(void *)&CP);
             if (err != 0)
-		     	printf("cant create thread: %s\n", strerror(err));
-        
+		     	printf("cant create thread: %s \n", strerror(err));
     }
     exit(0);
 }

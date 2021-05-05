@@ -3,69 +3,30 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <netdb.h>
-#include<sys/wait.h>
-//include <netinet/in.h>
-//include <arpa/inet.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <signal.h>
+#include "./Includes/clientFD.h"
+#include "./Includes/header.h" // For Encoding 
+
 
 #define	MAXLINE	 8192  /* Max text line length */
 
-int open_clientfd(char *hostname, char *port) {
-    int clientfd;
-    struct addrinfo hints, *listp, *p;
-	char host[MAXLINE],service[MAXLINE];
-    int flags;
-
-    /* Get a list of potential server addresses */
-    memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_socktype = SOCK_STREAM;  /* Open a connection */
-    hints.ai_flags = AI_NUMERICSERV;  /* ... using a numeric port arg. */
-    hints.ai_flags |= AI_ADDRCONFIG;  /* Recommended for connections where we get IPv4 or IPv6 addresses */
-    getaddrinfo(hostname, port, &hints, &listp);
+int stdin_dup;
   
-    /* Walk the list for one that we can successfully connect to */
-    for (p = listp; p; p = p->ai_next) {
-        /* Create a socket descriptor */
-        if ((clientfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0) 
-            continue; /* Socket failed, try the next */
-
-		flags = NI_NUMERICHOST | NI_NUMERICSERV; /* Display address string instead of domain name and port number instead of service name */		
-		getnameinfo(p->ai_addr, p->ai_addrlen, host, MAXLINE, service, MAXLINE, flags);
-        printf("host:%s, service:%s\n", host, service);
-		
-        /* Connect to the server */
-        if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1) 
-		{
-			printf("Connected to server %s at port %s\n", host, service);
-            break; /* Success */
-		}
-        close(clientfd); /* Connect failed, try another */  //line:netp:openclientfd:closefd
-    } 
-
-    /* Clean up */
-    freeaddrinfo(listp);
-    if (!p) /* All connects failed */
-        return -1;
-    else    /* The last connect succeeded */
-        return clientfd;
-}
-
-char* encode(char parameters[]){
-    int childpid;
-    char *result= malloc(sizeof(char)*MAXLINE);
-    int fd[2];
-    pipe(fd);
-    if ( (childpid = fork() ) == -1){
-        fprintf(stderr, "FORK failed");
+void alarmHandler(){
+    printf("\n\t\tSession Expired..\n");
         
-    } else if( childpid == 0) {
-        dup2(fd[1], 1);
-        close(fd[0]);
-        execlp("shellScriptFiles/encode.sh","shellScriptFiles/encode.sh","-c",parameters,NULL);
-    }
-    wait(NULL);
-    read(fd[0], result, MAXLINE);
-    return (char*)result;
+//   int input_fds = open("./input.txt", O_RDONLY);
+ 
+//   if(dup2(input_fds, STDIN_FILENO) < 0) {
+//     printf("Unable to duplicate file descriptor.");
+//     exit(EXIT_FAILURE);
+//   }
+ return;
 }
+
+void (*oldhandler)();
 
 int main(int argc, char **argv)
 {
@@ -75,52 +36,73 @@ int main(int argc, char **argv)
     port = argv[2];
     clientfd = open_clientfd(host, port);
 
+     stdin_dup= dup(STDIN_FILENO);
+  struct sigaction sa;
+  sa.sa_handler = alarmHandler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(SIGALRM, &sa, NULL);
+
+    //signal( SIGALRM, alarmHandler );	/* Install signal handler*/
+
     char TransactionID[13],Passcode[8],UserID[20],Password[15];
     while(optionToConti){
-        memset(TransactionID,0,sizeof TransactionID);
-        memset(Passcode ,0,sizeof Passcode);
-        memset(UserID ,0,sizeof UserID);
-        memset(Password ,0,sizeof Password);
-        
-        memset(buf,0,sizeof buf);
-        printf("*****************WELCOME*********************\n");
-        printf("Enter Transaction ID and PassCode for Payment\n");
-        printf("*********************************************\n");
-        scanf("%s",TransactionID);
-        scanf("%s",Passcode);
-        strcpy(buf,TransactionID);
-        strcat(buf," ");
-        strcat(buf,Passcode);
-        //   strcpy(buf,encode(buf));
-        write(clientfd, buf, strlen(buf));
-        memset(buf, 0, sizeof buf);
-        read(clientfd, buf, MAXLINE);
-        if(strcmp(buf,"Payment Failed")==0||strcmp(buf,"Payment Already paid")==0 ){
-            fputs(buf, stdout);
-        }
-        else{
-            printf("Amount to be paid is %s for Transaction ID %s\n\n",buf,TransactionID);
+        while(optionToConti){
+            memset(TransactionID,0,sizeof TransactionID);
+            memset(Passcode ,0,sizeof Passcode);
+            memset(UserID ,0,sizeof UserID);
+            memset(Password ,0,sizeof Password);
+            memset(buf,0,sizeof buf);
+            printf("*****************WELCOME*********************\n");
+            printf("Enter Transaction ID and PassCode for Payment\n");
             printf("*********************************************\n");
-            printf("   Enter USER  ID and Password for Payment\n");
-            printf("*********************************************\n");
-            scanf("%s",UserID);
-            scanf("%s",Password);
-            strcpy(buf,"");
-            strcpy(buf,UserID);
+            scanf("%s",TransactionID);
+            scanf("%s",Passcode);
+            strcpy(buf,TransactionID);
             strcat(buf," ");
-            strcat(buf,Password);
-            strcat(buf," ");
+            strcat(buf,Passcode);
             write(clientfd, buf, strlen(buf));
             memset(buf, 0, sizeof buf);
             read(clientfd, buf, MAXLINE);
-            fputs(buf, stdout);
-            memset(buf, 0, sizeof buf);
-    }
-    printf("\n\n Enter 0 to EXIT 1 for other Payments : ");
-    scanf("%d",&optionToConti);
+            if(strcmp(buf,"Payment Failed")==0||strcmp(buf,"Payment Already paid")==0 ){
+                printf("\n");
+                fputs(buf, stdout);
+            }else{
+
+                alarm(3);	/* Schedule an alarm signal in three seconds */
+                
+                printf("\nAmount to be paid is %s for Transaction ID %s\n\n",buf,TransactionID);
+                printf("*********************************************\n");
+                printf("   Enter USER  ID and Password for Payment\n");
+                printf("*********************************************\n");
+                if (scanf("%s",UserID)==1 && scanf("%s",Password)==1){
+                    // scanf("%s",UserID);
+                    // scanf("%s",Password);
+                    alarm(0);
+                    strcpy(buf,"");
+                    strcpy(buf,UserID);
+                    strcat(buf," ");
+                    strcat(buf,Password);
+                    strcat(buf," ");
+                    //strcpy(buf,encode(buf));
+                    write(clientfd, buf, strlen(buf));
+                    memset(buf, 0, sizeof buf);
+                    read(clientfd, buf, MAXLINE);
+                    if(strncmp(buf,"Bank",4)==0){
+                        printf("\n******************Congrats*******************\n");
+                    }
+                    fputs(buf, stdout);
+                    memset(buf, 0, sizeof buf);
+                }
+                
+        }
+        // sigemptyset(&sa.sa_mask);
+            printf("\n\n Enter 0 to EXIT 1 for other Payments : ");
+            scanf("%d",&optionToConti);
+        }
     }
     buf[0]='0';
-    write(clientfd, buf,1);
+    write(clientfd,buf,1);
     close(clientfd);
     exit(0);
 }
