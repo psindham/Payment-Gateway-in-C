@@ -69,7 +69,7 @@ int main(int argc, char **argv)
                 fputs(buf, stdout);
             }else{
 
-                alarm(3);	/* Schedule an alarm signal in three seconds */
+                alarm(10);	/* Schedule an alarm signal in 10 seconds */
                 
                 printf("\nAmount to be paid is %s for Transaction ID %s\n\n",buf,TransactionID);
                 printf("*********************************************\n");
@@ -84,7 +84,7 @@ int main(int argc, char **argv)
                     strcat(buf," ");
                     strcat(buf,Password);
                     strcat(buf," ");
-                    //strcpy(buf,encode(buf));
+                    // strcpy(buf,encode(buf));
                     write(clientfd, buf, strlen(buf));
                     memset(buf, 0, sizeof buf);
                     read(clientfd, buf, MAXLINE);
@@ -95,8 +95,13 @@ int main(int argc, char **argv)
                     memset(buf, 0, sizeof buf);
                 }
                 
+                
         }
         // sigemptyset(&sa.sa_mask);
+                 memset(buf, 0, sizeof buf);
+                 strcpy(buf,"DUMMY");
+                 write(clientfd, buf, strlen(buf));
+                 read(clientfd, buf, MAXLINE);
             printf("\n\n Enter 0 to EXIT 1 for other Payments : ");
             scanf("%d",&optionToConti);
         }

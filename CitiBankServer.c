@@ -11,11 +11,15 @@
 #include "./Includes/header.h" // For Decoding the Details
 
 
-/* Misc constants */
+/*Global Variables and Misc constants */
+
 #define	MAXLINE	 8192  /* Max text line length */
 #define LISTENQ  1024  /* Second argument to listen()*/
+#define USERDETAILS 22 /* Only Username Password */
+#define USERRECORD 44  /* Entire DATA(RECORD) to read */
 
-pthread_rwlock_t rw_lock_deduct_money;
+
+pthread_rwlock_t rw_lock_Transact_money;
 pthread_rwlock_t rw_lock_credit_money;
 pthread_mutex_t mymutex;
 
@@ -68,6 +72,7 @@ int open_listenfd(char *port)
 }
 #pragma endregion
 
+/*Provide UTR(Unique Transaction number) NUMBER */
 
 void * threadReturnUTRId(void *arg)
 {
@@ -97,7 +102,9 @@ void * threadReturnUTRId(void *arg)
     return ((void *) ret1);
 }
 
-int* getFMerchantFile(char MerchantId[])
+
+
+int* getFDMerchantFile(char MerchantId[])
 {
     char c[LISTENQ];
     size_t len = 0;
@@ -125,7 +132,7 @@ int DeductMoney(int *srcfd,int RemainingAmount,char MerchantId[],int PayAmount)
     char buf[15];
     sprintf(buf,"%010d%%",RemainingAmount);
 
-    int *desfd = getFMerchantFile(MerchantId);
+    int *desfd = getFDMerchantFile(MerchantId);
     lseek(*desfd,-15,SEEK_CUR);
     char MerchantAmount[15];
     read(*desfd,MerchantAmount,13);
@@ -140,16 +147,17 @@ int DeductMoney(int *srcfd,int RemainingAmount,char MerchantId[],int PayAmount)
         return 0;
     }
 
-    pthread_rwlock_wrlock(&rw_lock_deduct_money);
+    pthread_rwlock_wrlock(&rw_lock_Transact_money);
             if(write(*srcfd,buf,10)==-1 || write(*desfd,MerchantAmount,13) == -1)
             {
                 printf("Error-WRITE in File NetBankingUsers.txt\n");
                 return 0;
             }
-    pthread_rwlock_unlock(&rw_lock_deduct_money);
+    pthread_rwlock_unlock(&rw_lock_Transact_money);
     return 1;
 }
 
+/* Uses Another Thread to Do work*/
 
 int Transact(char data[])
 {
@@ -159,13 +167,13 @@ int Transact(char data[])
   
     while (1)
 	{
-        pthread_rwlock_rdlock(&rw_lock_deduct_money);
-            int read_result=read(srcfd,c,44);
-        pthread_rwlock_unlock(&rw_lock_deduct_money);
+        pthread_rwlock_rdlock(&rw_lock_Transact_money);
+            int read_result=read(srcfd,c,USERRECORD);
+        pthread_rwlock_unlock(&rw_lock_Transact_money);
             if(read_result==0)
                 break;
            printf("%s\n",c);  
-            if(strncmp(c+9,data,22)==0)
+            if(strncmp(c+9,data,USERDETAILS)==0)
             {   
                 char balance[11],payment[11];
                 strncpy(balance,c+32,10);
@@ -185,7 +193,7 @@ int Transact(char data[])
                     if(DeductMoney(&srcfd,balAmount-PayAmount,MerchantId,PayAmount)){
                   
                             pthread_t threadID;
-                            
+                            /* Uses Another Thread to Do work*/
                             int err = pthread_create (&threadID,NULL,threadReturnUTRId,NULL);
                             if (err != 0)
                                 printf("cant create thread: %s\n", strerror(err));
@@ -214,10 +222,13 @@ int Transact(char data[])
    return 0; //Payment Does not exists
 }
 
-void* Pay(int* connfd)
- {
+/*Each Thread execute PAY (MAIN) */
+
+void* Pay(int* connfd){
+    
     size_t n;  
     char buf[MAXLINE];
+    char EndOfClient[50]="Client ENDED connection\n";
     char message[50]="Bank Payment Done with Bank-UTR-ID is \0";
     char AccNOTEXIST[50]="Account Details Doesn't Exists!!\0";
     char FailMess[MAXLINE]="Payment Failed due to Insufficient Balance\0";
@@ -225,16 +236,22 @@ void* Pay(int* connfd)
         printf("Bank server received %d bytes\n", (int)n);
     	buf[n] = '\0';
         printf("Bank server received message : %s\n", buf);
-        int Results =Transact(buf);  // [0=Account Doeesnot exists,2=Failed Due to Insuffient Balance ,other than that is UTR number]
-        if(Results==0){
-            write(*connfd,AccNOTEXIST,strlen(AccNOTEXIST));
-        }else if( Results==2){
-            write(*connfd,FailMess,strlen(FailMess));
+        if(strncmp(buf,"DUMMY",5)!=0){
+            int Results =Transact(buf);  // [0=Account Doeesnot exists,2=Failed Due to Insuffient Balance ,other than that is UTR number]
+            if(Results==0){
+                write(*connfd,AccNOTEXIST,strlen(AccNOTEXIST));
+            }else if( Results==2){
+                write(*connfd,FailMess,strlen(FailMess));
+            }else{
+                sprintf(message+strlen(message),"%d",Results);
+                write(*connfd,message,strlen(message));
+            }
         }else{
-            sprintf(message+strlen(message),"%d",Results);
-            write(*connfd,message,strlen(message));
+            write(*connfd,EndOfClient,strlen(EndOfClient));
         }
 }
+
+/*Thread Handler*/
 
 void * GatewayServer_handler(void *connfd){
     int GatewayServer_client_connfd= *((int*)connfd);
@@ -251,11 +268,19 @@ int main(int argc, char **argv)
     struct sockaddr_storage clientaddr; /* Enough room for any addr */
     char client_hostname[MAXLINE], client_port[MAXLINE];
     listenfd = open_listenfd(argv[1]);
+    
+    /*Initialize Mutexes*/
+
     pthread_mutex_init(&mymutex, NULL);
-    pthread_rwlock_init(&rw_lock_deduct_money, NULL);
+    pthread_rwlock_init(&rw_lock_Transact_money, NULL);
+
+
     while (1) {
         printf("Waiting for a new Client to connect\n");
         clientlen = sizeof(struct sockaddr_storage); /* Important! */
+        
+        /*Accept the Connection*/
+
         connfd = accept(listenfd, (struct sockaddr *)&clientaddr, &clientlen);
         getnameinfo((struct sockaddr *) &clientaddr, clientlen,
         client_hostname, MAXLINE, client_port, MAXLINE, 0);
@@ -263,13 +288,21 @@ int main(int argc, char **argv)
         printf("Start Communication with Client\n");
         int *sclient=malloc(sizeof(int));
         *sclient = connfd;
+
+        /*Give that Connfd to client Ephimeral PORT on localhost*/
+
         pthread_t tid;
         int err =  pthread_create(&tid,NULL,GatewayServer_handler,(void *)sclient);
         if (err != 0)
              printf("cant create thread: %s\n", strerror(err));
+
+
     }
+
+    /*uninitialize Mutexes*/
+
     pthread_mutex_destroy(&mymutex);
-    pthread_rwlock_destroy(&rw_lock_deduct_money);
+    pthread_rwlock_destroy(&rw_lock_Transact_money);
     exit(0);
 }
 

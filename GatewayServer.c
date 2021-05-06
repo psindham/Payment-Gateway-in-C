@@ -48,7 +48,7 @@ int open_listenfd(char *port)
     hints.ai_socktype = SOCK_STREAM;             /* Accept connections */
     hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG; /* ... on any IP address AI_PASSIVE - used on server for TCP passive connection, AI_ADDRCONFIG - to use both IPv4 and IPv6 addresses */
     hints.ai_flags |= AI_NUMERICSERV;            /* ... using port number instead of service name*/
-    getaddrinfo(NULL, port, &hints, &listp);
+    getaddrinfo("127.0.0.1", port, &hints, &listp);
 
     /* Walk the list for one that we can bind to */
     for (p = listp; p; p = p->ai_next) {
@@ -196,6 +196,8 @@ void* PaymentTokenReceiver(int* connfd){
                 strcat(buf,Price);
                 printf("Gateway server received message : %s\n", buf);
 
+             if(strncmp(buf,"DUMMY",5)!=0){
+
                 strcpy(BankReply,TransactPayment(buf));// Reply From the Bank
 
                 if(strncmp(BankReply,"Account",7)!=0 && strncmp(BankReply,"Payment",7)!=0)
@@ -223,6 +225,10 @@ void* PaymentTokenReceiver(int* connfd){
                      write(*connfd,BankReply,strlen(BankReply));
                      memset(BankReply,0,sizeof BankReply);
                 }
+             }else{
+                  memset(buf, 0, sizeof buf);
+                  write(*connfd,FailMess,strlen(FailMess));//Failure of Payment
+             }
             }else if(resultPaymentValid==2){ //if payment is already done
                 memset(buf, 0, sizeof buf);
                 write(*connfd,PaidMess,strlen(PaidMess));//Payment already done
@@ -259,7 +265,7 @@ int main(int argc, char **argv)
         newhandler.sa_mask = blocked; 
         int i;
         for (i=1; i<31;i++)
-            if (i!=9 && i!=17) /* catch all except these signals */
+            if (i!=9 && i!=17 && i!=19 && i!=2) /* catch all except these signals */
                 if ( sigaction(i, &newhandler, NULL) == -1 )
                     printf("error with signal %d\n", i);
 
