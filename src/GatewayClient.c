@@ -6,9 +6,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <signal.h>
-#include "./Includes/clientFD.h"
-#include "./Includes/header.h" // For Encoding 
-
+#include ".././includes/header.h" // For Encoding 
 
 #define	MAXLINE	 8192  /* Max text line length */
 
@@ -16,17 +14,12 @@ int stdin_dup;
   
 void alarmHandler(){
     printf("\n\t\tSession Expired..\n");
-        
-//   int input_fds = open("./input.txt", O_RDONLY);
- 
-//   if(dup2(input_fds, STDIN_FILENO) < 0) {
-//     printf("Unable to duplicate file descriptor.");
-//     exit(EXIT_FAILURE);
-//   }
  return;
 }
 
 void (*oldhandler)();
+
+int open_clientfd(char *hostname, char *port);
 
 int main(int argc, char **argv)
 {

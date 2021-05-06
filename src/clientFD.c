@@ -1,4 +1,14 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <signal.h>
+
 #define	MAXLINE	 8192 
+#define LISTENQ  1024  
 
 int open_clientfd(char *hostname, char *port) {
     int clientfd;
