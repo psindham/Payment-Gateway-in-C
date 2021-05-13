@@ -25,6 +25,7 @@ void* Pay(int* connfd){
         printf("Bank server received %d bytes\n", (int)n);
     	buf[n] = '\0';
         printf("Bank server received message : %s\n", buf);
+        decode(buf);// decode 
         if(strncmp(buf,"DUMMY",5)!=0){
             int Results =Transact(buf);  // [0=Account Doeesnot exists,2=Failed Due to Insuffient Balance ,other than that is UTR number]
             if(Results==0){
@@ -84,7 +85,6 @@ int main(int argc, char **argv)
         int err =  pthread_create(&tid,NULL,GatewayServer_handler,(void *)sclient);
         if (err != 0)
              printf("cant create thread: %s\n", strerror(err));
-
 
     }
 

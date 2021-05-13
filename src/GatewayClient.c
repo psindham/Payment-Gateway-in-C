@@ -47,9 +47,11 @@ int main(int argc, char **argv)
             memset(Password ,0,sizeof Password);
             memset(buf,0,sizeof buf);
             printf("*****************WELCOME*********************\n");
-            printf("Enter Transaction ID and PassCode for Payment\n");
+            printf("    Enter Transaction Details for Payment       \n");
             printf("*********************************************\n");
+            printf("\nEnter Transaction ID : ");
             scanf("%s",TransactionID);
+            printf("\nEnter Passcode : ");
             scanf("%s",Passcode);
             strcpy(buf,TransactionID);
             strcat(buf," ");
@@ -62,22 +64,19 @@ int main(int argc, char **argv)
                 fputs(buf, stdout);
             }else{
 
-                alarm(10);	/* Schedule an alarm signal in 10 seconds */
-                
+                alarm(30);	/* Schedule an alarm signal in 30 seconds */
                 printf("\nAmount to be paid is %s for Transaction ID %s\n\n",buf,TransactionID);
                 printf("*********************************************\n");
                 printf("   Enter USER  ID and Password for Payment\n");
                 printf("*********************************************\n");
                 if (scanf("%s",UserID)==1 && scanf("%s",Password)==1){
-                    // scanf("%s",UserID);
-                    // scanf("%s",Password);
-                    alarm(0);
+                    alarm(0); //reset alarm 
                     strcpy(buf,"");
                     strcpy(buf,UserID);
                     strcat(buf," ");
                     strcat(buf,Password);
                     strcat(buf," ");
-                    // strcpy(buf,encode(buf));
+                    //strcpy(buf,encode(buf));
                     write(clientfd, buf, strlen(buf));
                     memset(buf, 0, sizeof buf);
                     read(clientfd, buf, MAXLINE);
@@ -90,7 +89,6 @@ int main(int argc, char **argv)
                 
                 
         }
-        // sigemptyset(&sa.sa_mask);
                  memset(buf, 0, sizeof buf);
                  strcpy(buf,"DUMMY");
                  write(clientfd, buf, strlen(buf));

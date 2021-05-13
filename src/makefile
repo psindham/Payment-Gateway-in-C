@@ -56,7 +56,7 @@ _APPOBJGateServer = GatewayServer.o
 APPOBJGateServer = $(patsubst %,$(ODIR)/%,$(_APPOBJGateServer))
 
 _APPOBJGateClient = GatewayClient.o
-APPOBJGateServer = $(patsubst %,$(ODIR)/%,$(_APPOBJGateServer))
+APPOBJGateClient = $(patsubst %,$(ODIR)/%,$(_APPOBJGateClient))
 
 _APPOBJCitiServer = CitiBankServer.o
 APPOBJCitiServer = $(patsubst %,$(ODIR)/%,$(_APPOBJCitiServer))
@@ -67,18 +67,17 @@ CitiBankServer.out: $(APPOBJCitiServer) $(ODIR)/DepsCitiBank.o $(LDIR)/libListen
 GatewayServer.out: $(APPOBJGateServer) $(ODIR)/DepsGatewayServer.o $(LDIR)/libListen.so $(LDIR)/libClient.so 
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS) -pthread
 
-GatewayClient.out: $(_APPOBJGateClient) $(LDIR)/libClient.so 
+GatewayClient.out: $(APPOBJGateClient)  $(LDIR)/libClient.so 
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS) 
 
 
 .PHONY: clean
-#removes object files and temporary files created with ~ at the end of file name in current i.e. source and include directory
 clean: 
 	rm -f $(ODIR)/*.o *~ core $(INCDIR)/*~
 	rm -f $(LDIR)/libClient.so $(LDIR)/libListen.so CitiBankServer.out GatewayServer.out GatewayClient.out
-	
+
 .PHONY: all
-all:$(LDIR)/libClient.so $(LDIR)/libListen.so CitiBankServer.out GatewayServer.out GatewayClient.out
+all:$(LDIR)/libClient.so $(LDIR)/libListen.so CitiBankServer.out GatewayServer.out GatewayClient.out 
 
 
 
